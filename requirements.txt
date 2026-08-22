@@ -1,0 +1,13 @@
+pandas
+scikit-learn
+pyarrow
+pillow
+imagehash
+numpy
+torch
+transformers
+ultralytics
+faiss-cpu
+open_clip_torch
+matplotlib
+huggingface_hub
