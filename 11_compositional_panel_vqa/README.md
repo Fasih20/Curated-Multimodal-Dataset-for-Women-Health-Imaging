@@ -19,6 +19,11 @@ For gated MedGemma on Colab, clone this repository in a UI notebook, add an
 Predictions checkpoint to `MyDrive/womens_health_medvlm_results` and a ZIP is
 downloaded when all three models finish.
 
+For Kaggle dual-T4 execution, import `kaggle_medical_vlm_benchmark.ipynb`,
+enable Internet and the `GPU T4 x2` accelerator, and add an `HF_TOKEN` Kaggle
+secret. The notebook downloads the Drive archive, runs each model/track in an
+isolated resumable process, and writes a results ZIP under `/kaggle/working`.
+
 Example:
 
 ```bash

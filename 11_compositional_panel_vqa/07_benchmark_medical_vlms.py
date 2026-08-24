@@ -61,7 +61,8 @@ def load_model(key: str, token: str | None):
                               BitsAndBytesConfig, Qwen2VLForConditionalGeneration,
                               Qwen2_5_VLForConditionalGeneration)
     model_id = MODELS[key]; processor = AutoProcessor.from_pretrained(model_id, token=token)
-    common = {"device_map": "auto", "token": token, "dtype": torch.bfloat16,
+    device_map = "balanced" if torch.cuda.device_count() > 1 else "auto"
+    common = {"device_map": device_map, "token": token, "dtype": torch.bfloat16,
               "quantization_config": BitsAndBytesConfig(load_in_4bit=True,
                   bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4")}
     if key == "lingshu-7b":
