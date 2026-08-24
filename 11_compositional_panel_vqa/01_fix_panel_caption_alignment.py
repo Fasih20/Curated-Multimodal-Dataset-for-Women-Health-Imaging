@@ -183,8 +183,6 @@ def _apply_similarity_floor(results: list[dict]) -> list[dict]:
             r["assigned_segment_text"] = None
     return results
 
-    return results
-
 
 def process_track(track: str) -> pd.DataFrame | None:
     paths = TRACK_PATHS[track]

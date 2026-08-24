@@ -17,6 +17,7 @@ benchmarks 8 vision-language models against it.
 | 6 | `06_pipeline_biomedclip_ablation/` | Stage 2b–8b: same pipeline, BiomedCLIP instead of CLIP (ablation) |
 | 7 | `07_comparison/` | Stage 9: head-to-head CLIP vs BiomedCLIP |
 | 8 | `08_vlm_benchmarking/` | Stage 10a: benchmark Qwen2-VL-2B, BLIP, PaliGemma (Colab, 1 GPU) |
+| 11 | `11_compositional_panel_vqa/` | Cross-panel categorical VQA, constrained alignment, frozen-embedding set attention, and saved-prediction baselines |
 | — | `09_utils/` | Colab session backup/restore, zip+download — dev convenience, not part of the pipeline |
 | — | `10_kaggle_models/` | Stage 10b: benchmark the other 6 VLMs — Qwen2-VL-7B, LLaVA-1.5-7B, InstructBLIP-Vicuna-7B, Idefics2-8B, Llama-3.2-11B-Vision, LLaVA-NeXT-13B (Kaggle, 2x T4) |
 
@@ -81,7 +82,8 @@ re-running skips predictions already saved.
 
 ### Running this outside Colab/Kaggle
 
-Every script still has hardcoded `/content/...` or `/kaggle/...` paths.
+Stages 1–10 still have hardcoded `/content/...` or `/kaggle/...` paths;
+Stage 11 uses the configurable `PIPELINE_ROOT` environment variable.
 To run locally or in CI, either:
 1. Edit the path constants at the top of each script (`DRIVE_ROOT`,
    `PIPELINE_ROOT`, `IN_PATH`/`OUT_PATH`, etc.) to point at your own

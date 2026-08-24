@@ -61,6 +61,11 @@ STAGES: list[tuple[str, str, bool]] = [
     ("08b", "08_vlm_benchmarking/03_inspect_vqa_predictions_ANALYSIS.py", True),
     ("08c", "08_vlm_benchmarking/04_inspect_captioning_predictions_ANALYSIS.py", True),
     ("08d", "08_vlm_benchmarking/05_qwen_vs_blip_comparison_ANALYSIS.py", True),
+    ("11.1", "11_compositional_panel_vqa/01_fix_panel_caption_alignment.py", False),
+    ("11.2", "11_compositional_panel_vqa/02_generate_compositional_questions.py", False),
+    ("11.3", "11_compositional_panel_vqa/03_train_panel_set_attention.py", False),
+    ("11.4", "11_compositional_panel_vqa/04_baseline_single_panel_vlm_eval.py", False),
+    ("11.5", "11_compositional_panel_vqa/05_run_full_evaluation_and_ablations.py", False),
 ]
 
 # Folder-prefix -> stage labels, used for --track filtering
@@ -96,7 +101,10 @@ def main() -> None:
 
         script = REPO_ROOT / rel_path
         print(f"\n=== [{label}] running {rel_path} ===")
-        result = subprocess.run([sys.executable, str(script)])
+        command = [sys.executable, str(script)]
+        if label in {"11.1", "11.2", "11.3", "11.4"}:
+            command.extend(["--track", args.track])
+        result = subprocess.run(command)
         if result.returncode != 0:
             print(f"Stage {label} ({rel_path}) failed with code "
                   f"{result.returncode}. Stopping.")

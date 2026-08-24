@@ -4,6 +4,7 @@ pyarrow
 pillow
 imagehash
 numpy
+scipy
 torch
 transformers
 ultralytics
@@ -11,3 +12,4 @@ faiss-cpu
 open_clip_torch
 matplotlib
 huggingface_hub
+pytest

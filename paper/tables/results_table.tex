@@ -1,0 +1,16 @@
+\begin{tabular}{llrrrrr}
+\toprule
+Method & Backbone & $n$ & Overall & Same/diff. & Odd-one-out & Count \\
+\midrule
+blip2-opt-2.7b & biomedclip & 0 & -- & -- & -- & -- \\
+paligemma-3b & biomedclip & 0 & -- & -- & -- & -- \\
+qwen2-vl-2b & biomedclip & 0 & -- & -- & -- & -- \\
+blip2-opt-2.7b & clip & 1 & 100.0 & 100.0 & -- & -- \\
+paligemma-3b & clip & 0 & -- & -- & -- & -- \\
+qwen2-vl-2b & clip & 1 & 100.0 & 100.0 & -- & -- \\
+mean-pool ablation & biomedclip & 164 & 50.6 & 71.2 & 0.0 & 34.4 \\
+mean-pool ablation & clip & 103 & 53.4 & 79.2 & 0.0 & 31.5 \\
+set-attention (proposed) & biomedclip & 164 & 52.4 & 71.2 & 0.0 & 37.8 \\
+set-attention (proposed) & clip & 103 & 50.5 & 77.1 & 0.0 & 27.8 \\
+\bottomrule
+\end{tabular}

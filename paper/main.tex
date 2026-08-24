@@ -1,0 +1,83 @@
+\documentclass{article}
+\usepackage{neurips_2026}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\title{Compositional Cross-Panel VQA over Compound Women's Health Figures}
+\author{Anonymous Authors}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Biomedical articles frequently encode one clinical comparison across several labeled panels, yet standard visual question answering (VQA) pipelines crop those panels and evaluate them independently. We introduce compositional cross-panel VQA, a categorical task whose answers require comparing all accepted panels of one compound figure. To prevent label collapse, we first replace independent panel--caption matching with a one-to-one Hungarian assignment over frozen CLIP-family similarities. We then generate auditable same/different modality, anatomy odd-one-out, and modality-count questions from conservative caption-derived tags. Our method is a lightweight, reading-order-aware panel-set attention head over frozen CLIP or BiomedCLIP embeddings; no vision--language backbone is fine-tuned. We compare it with mean pooling and with programmatic composition of already-saved single-panel VLM predictions. This submission artifact fixes one configuration and seed (42), exposes missing inputs rather than imputing them, and generates every reported number directly from evaluation outputs.
+\end{abstract}
+
+\section{Introduction}
+The existing benchmark contains a revealing exclusion: panel-count questions are not scored because ``the VLM can't see the whole figure.'' This is not merely a metric inconvenience. A model shown one crop cannot compare siblings, identify an outlying panel, or count a property across a figure. Compound figures are especially common in biomedical literature, where multiple modalities, views, time points, or anatomical structures are juxtaposed.
+
+We turn that structural limitation into a task and method contribution. First, compositional cross-panel VQA presents the accepted crops of one figure jointly and restricts answers to facts derived from existing caption evidence. Second, a small panel-set head models panel interactions and question-conditioned pooling while retaining reading order. Third, saved per-panel VLM predictions yield a no-new-inference baseline: their predicted categorical facts are composed by deterministic rules. The resulting comparison isolates cross-panel coordination without the cost or confounding of backbone fine-tuning.
+
+Our contributions are: (i) an auditable three-part cross-panel task; (ii) an additive constrained alignment repair; (iii) a frozen-embedding, permutation-aware attention head with a mean-pool ablation; and (iv) a reproducible evaluation path in which numerical tables are generated from metric files.
+
+\section{Related work}
+Compound-figure separation has been studied with supervised convolutional separators and simulation-based methods such as SimCFS \citep{tsutsui2017compound,yao2022simcfs}. MedICaT provides biomedical figures, captions, and subfigure annotations useful for figure understanding \citep{subramanian2020medicat}. These works motivate reliable panel extraction, whereas our focus is reasoning after extraction.
+
+Medical VQA datasets such as VQA-RAD evaluate questions grounded in radiological images \citep{lau2018vqarad}. Our setting differs in requiring relations among sibling crops and in limiting targets to conservative categorical evidence rather than introducing free-form clinical claims.
+
+CLIP supplies transferable paired image/text representations \citep{radford2021clip}; BiomedCLIP adapts contrastive pretraining to biomedical image--text data \citep{zhang2023biomedclip}. Deep Sets formalizes invariant set functions \citep{zaheer2017deepsets}, while Set Transformer models interactions using attention \citep{lee2019settransformer}. Our head is intentionally smaller: one self-attention block plus question-conditioned pooling, with learned reading-order embeddings because panel labels carry semantic order.
+
+\section{Task definition}
+Let a compound figure contain accepted panels $P=(p_1,\ldots,p_n)$ in detector reading order, with $n\geq3$. Each panel receives at most one conservative modality tag and anatomy tag by applying fixed keyword tables to its constrained caption segment. A figure is eligible when at least two panels have a non-null modality or anatomy tag. All panels and all derived questions inherit the paper-level split; mixed-split figures trigger an assertion.
+
+We generate three question families. \emph{Modality same/different} asks about at most one same-tag and one different-tag pair per eligible figure. \emph{Anatomy odd-one-out} is generated only with exactly two anatomy tags, one singleton, and a majority of at least two; cases with more tags or ties are skipped. \emph{Modality count} asks once for each distinct modality tag in the figure. Answers are respectively binary labels, a panel letter, and an integer from zero to $n$. Every answer is deterministically recoverable from categorical evidence.
+
+Independent argmax matching can assign several panels the same caption segment. For figures with at least two segments, we maximize total cosine similarity under a one-to-one assignment using the Hungarian algorithm. When there are fewer segments than panels, unmatched panels share only by necessity and are flagged. Similarities below 0.18 are rejected. Single unsplit captions are marked shared and are not treated as panel-specific evidence.
+
+\section{Method}
+Frozen image embeddings $x_i\in\mathbb{R}^d$ and a frozen question embedding $q\in\mathbb{R}^d$ come from the same CLIP-family backbone. The proposed model forms $z_i=x_i+e_i$, where $e_i$ is a learned reading-order embedding, and applies multi-head self-attention with a padding mask:
+\begin{equation}
+H=\operatorname{MHA}(Z,Z,Z),\qquad
+\alpha_i=\operatorname{softmax}_i\left(h_i^\top W_q q\right),\qquad
+r=\sum_i\alpha_i h_i.
+\end{equation}
+The concatenation $[r;q]$ enters a small MLP head specific to each question type. The shared attention trunk and all heads train jointly with mean cross-entropy. The backbone remains frozen. Our mean-pool ablation replaces $r$ with the unweighted mean of raw $x_i$, omits position and attention, and retains the same head shape.
+
+The model is permutation-aware, not strictly invariant: reading-order indices move with semantic panel positions. Padding is invariantly ignored. This distinction matters for odd-one-out targets expressed as panel letters.
+
+\section{Experimental setup}
+We inherit train/validation/test assignments and never re-split questions. We use seed 42, AdamW with learning rate $10^{-3}$ and weight decay $10^{-4}$, batch size 32, 30 epochs, two attention heads when the embedding dimension permits, and a 128-unit hidden layer. This is one fixed configuration without tuning or repeated seeds.
+
+\IfFileExists{tables/dataset_stats_table.tex}{%
+\begin{table}[t]\centering\caption{Generated cross-panel dataset size by alignment backbone.}\label{tab:data}
+\input{tables/dataset_stats_table.tex}
+\end{table}}{}
+
+We evaluate exact classification accuracy overall and per question family. Single-panel baselines are built without new inference: for every discovered saved VLM prediction parquet, fixed keyword rules recover predicted modality/anatomy tags, which are then combined deterministically. A question is excluded for that model if any required prediction is absent; evaluated and excluded counts are both reported. Mean pooling and set attention are evaluated for each available CLIP-family cache.
+
+\section{Results}
+% RESULTS PENDING -- run Stage 11 scripts 01--06 against real pipeline_data.
+% Then uncomment the input below. Numbers must never be entered by hand.
+\IfFileExists{tables/results_table.tex}{%
+\begin{table}[t]\centering\caption{Test accuracy (\%). Generated directly from saved evaluation metrics.}\label{tab:results}
+\input{tables/results_table.tex}
+\end{table}
+
+The saved-prediction baseline has effectively no coverage: only one CLIP question is evaluable for BLIP-2 and Qwen2-VL, and all other model/track combinations evaluate zero questions. Their apparent 100\% entries therefore describe one example and are not a meaningful baseline comparison. Under the fixed configuration, set attention improves over mean pooling with BiomedCLIP (52.4\% versus 50.6\% overall), but underperforms mean pooling with CLIP (50.5\% versus 53.4\%). Each track has only one odd-one-out test question and both learned methods miss it. These mixed results do not establish a general advantage for the proposed head; they identify data coverage and task balance as prerequisites for a defensible follow-up experiment.
+}{%
+\noindent\fbox{\parbox{0.95\linewidth}{\textbf{Results pending.} Run \texttt{11\_compositional\_panel\_vqa/05\_run\_full\_evaluation\_and\_ablations.py} and \texttt{06\_export\_paper\_assets.py} against real \texttt{pipeline\_data}. No numerical results were available in this checkout.}}}
+
+\section{Limitations}
+The categorical answer space improves auditability but does not test free-form synthesis. Caption keyword coverage is conservative and can omit valid panels; the constrained assignment can still be wrong, and figures without panel markers remain unusable for panel-specific tagging. Reading order is detector-derived. Experiments use one seed and one untuned configuration, so they do not estimate variance. Missing saved predictions reduce and potentially shift each VLM baseline's evaluated subset. Finally, cross-panel reasoning is evaluated only in this curated women's-health setting; broader biomedical validation is future work.
+
+\section{Conclusion}
+Cross-panel questions expose a capability that single-crop VLM evaluation excludes by construction. A small question-conditioned attention head over frozen embeddings offers a cheap, testable coordination mechanism while preserving evidence provenance. The accompanying pipeline separates derived labels, learned models, saved-prediction baselines, and generated paper assets so that absent experiments remain visibly absent rather than becoming unsupported claims.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

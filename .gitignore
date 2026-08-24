@@ -1,4 +1,7 @@
 __pycache__/
+.venv/
+.tmp-pip/
+.pytest_cache/
 *.pyc
 pipeline_data/
 *.aux
