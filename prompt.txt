@@ -1,0 +1,350 @@
+You are implementing the remainder of a NeurIPS (main track) submission
+for the "Curated Multimodal Dataset for Women's Health Imaging" project.
+Read this whole file before doing anything. This prompt is self-contained
+-- you do not have access to any prior conversation about this project,
+so everything you need is either here or in the files it points to.
+
+===============================================================================
+CONTEXT
+===============================================================================
+
+This repo already contains a working pipeline (Stages 01-10, see README.md)
+that builds a curated compound-figure panel dataset (YOLO panel detection +
+CLIP/BiomedCLIP alignment) and benchmarks 8 VLMs on it. A professor reviewed
+this and said it lacks the algorithmic novelty NeurIPS main track expects --
+dataset curation + benchmarking alone isn't a contribution.
+
+The fix, already designed and partially implemented, is documented in:
+
+    docs/superpowers/specs/2026-08-24-compositional-panel-vqa-design.md
+
+READ THAT FILE IN FULL BEFORE DOING ANYTHING ELSE. It is the actual spec --
+this prompt only summarizes it and tells you what's left to do. If anything
+here conflicts with that spec, the spec wins; if the spec is ambiguous,
+resolve it in the direction of "smaller, cheaper, more defensible" -- there
+is a hard deadline (see below).
+
+Short version of the idea: the project's own VLM-benchmarking code already
+excludes `panel_count` questions from scoring with the comment "the VLM
+can't see the whole figure" -- i.e. every existing VLM in this benchmark can
+only ever look at ONE panel crop at a time. The new contribution is (a) a
+task that requires reasoning across MULTIPLE panels of the same compound
+figure (which no single-panel VLM can do by construction), and (b) a tiny,
+cheap, novel method -- a permutation-aware panel-set attention head trained
+on top of already-cached, frozen CLIP/BiomedCLIP embeddings -- that solves
+it. This is the paper's algorithmic novelty claim.
+
+===============================================================================
+HARD CONSTRAINTS -- DO NOT VIOLATE THESE
+===============================================================================
+
+1. DEADLINE: NeurIPS submission deadline is 2026-08-30. Check today's date
+   and budget accordingly. If you are running low on time, cut scope (see
+   spec section 6 "Scope cuts") rather than cutting corners on correctness
+   or honesty.
+
+2. NEVER FABRICATE RESULTS. If you cannot run something for real (missing
+   data, missing dependency, out of time), say so explicitly in the paper
+   and in your final report to the user. A paper section that says
+   "[RESULTS PENDING -- run 11_compositional_panel_vqa/05_... to populate]"
+   is honest and acceptable. A paper section with invented numbers is not,
+   under any circumstances, even as a "placeholder to be replaced later."
+
+3. NO BACKBONE FINE-TUNING. CLIP/BiomedCLIP stay frozen throughout. Only
+   the new small attention/pooling head + MLP gets trained.
+
+4. NO NEW VLM INFERENCE RUNS. The single-panel VLM baseline reuses
+   predictions already saved under `08_vlm_benchmarking/` /
+   `vlm_benchmark_*_v1/vqa_predictions/*.parquet` (or the Kaggle-produced
+   equivalents under `10_kaggle_models/` output, if present on your
+   machine). Do not launch new Qwen2-VL/BLIP-2/etc. inference jobs.
+
+5. Every pipeline data path should be configurable via a `PIPELINE_ROOT`
+   environment variable (see `11_compositional_panel_vqa/01_fix_panel_caption_alignment.py`
+   for the pattern already used) -- do not hardcode `/content/...` or
+   `/kaggle/...` paths in new scripts. This new stage is meant to run on
+   your own machine against your own copy of pipeline_data.
+
+6. TEST BEFORE TRUSTING. Before running anything against your real
+   pipeline_data, write and run a synthetic-data unit test (see
+   `tests/test_stage11_alignment_fix.py` for the existing pattern and
+   `tests/_load_stage_module.py` for the import-numbered-scripts helper).
+   This already caught one real bug in the alignment fix -- assume new
+   code has bugs too and budget time to find them this way, not by staring
+   at real-data output.
+
+7. Single seed (42, matching the rest of the repo), single hyperparameter
+   configuration. State this plainly as a limitation in the paper. Do not
+   spend deadline time on hyperparameter search or multi-seed variance --
+   the spec explicitly rules this out of scope.
+
+===============================================================================
+WHAT'S ALREADY DONE (do not redo, verify then build on it)
+===============================================================================
+
+- `11_compositional_panel_vqa/01_fix_panel_caption_alignment.py` --
+  replaces Stage 2/2b's independent per-panel argmax (which lets multiple
+  panels collapse onto the same caption text -- see
+  `figures/5588608__4246_demo.png` for a real example of the bug) with a
+  one-to-one Hungarian assignment per figure. Additive: writes
+  `pipeline_data/compositional_vqa_v1/alignment_constrained_{track}.parquet`
+  with new columns (`assigned_segment_text`, `assigned_similarity`,
+  `alignment_mode`) without touching Stage 2/2b's own outputs.
+- `tests/test_stage11_alignment_fix.py` + `tests/_load_stage_module.py` --
+  6 passing synthetic-data tests covering: full distinct assignment,
+  breaking a naive-argmax collision, single-shared-caption figures,
+  zero-candidate-text figures, insufficient-segments partial sharing, and
+  the MIN_SIMILARITY floor being applied uniformly across all code paths.
+
+Run `python3 -m pytest tests/ -v` first to confirm these still pass on
+your machine before adding anything.
+
+Once you have real `pipeline_data/` in place, actually RUN this script
+(`python 11_compositional_panel_vqa/01_fix_panel_caption_alignment.py --track both`,
+with `PIPELINE_ROOT` pointed at your real pipeline_data) and sanity-check
+its printed summary before moving on -- e.g. confirm
+`figures_fully_distinct_assignment` is a meaningful fraction of total
+figures, not near-zero (which would mean most captions never had
+per-panel letter markers to begin with, a fact worth noting honestly in
+the paper's limitations either way).
+
+===============================================================================
+WHAT'S LEFT TO IMPLEMENT
+===============================================================================
+
+Follow spec sections 3-5 exactly. In order:
+
+### 11.2 -- Question generation (spec section 3)
+
+New script: `11_compositional_panel_vqa/02_generate_compositional_questions.py`
+
+- Reads the Stage 3 `accepted_dataset.parquet` (per track: `quality_v1/`
+  or `quality_biomedclip_v1/`) joined with Script 11.1's
+  `alignment_constrained_{track}.parquet` output.
+- Re-derive modality/anatomy tags per panel by applying the SAME
+  `MODALITY_KEYWORDS` / `ANATOMY_KEYWORDS` keyword tables from
+  `05_pipeline_clip/stage6_vqa_dataset.py` to each panel's
+  `assigned_segment_text` (NOT `best_match_text` -- use the fixed
+  alignment). Copy the keyword dicts into this new script rather than
+  importing across folders (matches this repo's existing convention of
+  self-contained numbered scripts).
+- Extract panel reading order from the panel_id naming convention
+  (`{figure_id}_{letter}`, letters assigned in reading order by
+  `05_pipeline_clip/stage1_run_detector_and_crop_panels.py`'s
+  `order_boxes`).
+- Implement the 3 question types EXACTLY as specified in spec section 3:
+  modality same/different (one same-pair + one different-pair per
+  eligible figure, when both exist), odd-one-out anatomy (only when
+  exactly one panel's tag differs from a majority of >=2 sharing another
+  tag -- skip ambiguous cases with >2 distinct tags), count-of-modality
+  (one question per distinct modality tag present in the figure).
+- Apply the eligibility filter from spec section 3 (>=3 accepted panels,
+  >=2 panels with a non-null tag) BEFORE generating questions for a
+  figure -- do not generate degenerate questions for ineligible figures.
+- Output: `pipeline_data/compositional_vqa_v1/compositional_vqa_dataset_{track}.parquet`
+  with exactly the columns spec section 3 lists (`figure_id`, `panel_ids`,
+  `question`, `question_type`, `answer`, `answer_space`, `split`). Verify
+  all panels in a `panel_ids` list share the same `split` value (assert
+  this -- if it ever fails, something upstream is leaking, stop and
+  investigate rather than silently picking one).
+- Write a unit test (`tests/test_stage11_question_generation.py`) against
+  small synthetic accepted_dataset/alignment fixtures covering: a figure
+  that should produce all 3 question types, a figure below the
+  eligibility bar (must produce zero questions), an odd-one-out case with
+  3+ distinct tags (must be skipped as ambiguous), and a same/different
+  pair selection when only one pairing type exists.
+
+### 11.3 -- Panel-set attention model + training (spec section 4)
+
+New script: `11_compositional_panel_vqa/03_train_panel_set_attention.py`
+
+- Loads `compositional_vqa_dataset_{track}.parquet` plus the cached panel
+  embeddings (`panel_image_embeds.npy` / `panel_image_ids.json` under
+  `alignment_v1/embed_cache/` or `alignment_biomedclip_v1/embed_cache/`
+  depending on track).
+- Embed the (small, deduplicated) set of distinct question strings once
+  using the SAME frozen backbone's text tower (transformers.CLIPModel for
+  "clip", open_clip's BiomedCLIP loader for "biomedclip" -- see
+  `05_pipeline_clip/stage2_clip_alignment.py` and
+  `06_pipeline_biomedclip_ablation/stage2b_biomedclip_alignment.py` for
+  the exact loading pattern to reuse). Cache to
+  `compositional_vqa_v1/embed_cache/question_embeds_{track}.npy` +
+  `question_texts_{track}.json`, restartable like the rest of the repo
+  (skip-if-exists).
+- Implement two model classes exactly per spec section 4 and section 5
+  point 2:
+    - `PanelSetAttention`: learned positional embedding (by reading-order
+      index) added to each panel embedding, multi-head self-attention
+      over the panel token set (with a padding mask for variable panel
+      counts across a batch), then attention-weighted pooling against the
+      question embedding, then a per-question-type linear classification
+      head over that type's `answer_space`.
+    - `MeanPoolAblation`: plain mean of raw panel embeddings, NO
+      positional encoding, NO attention -- concatenated with the question
+      embedding, then the same per-question-type MLP head shape. This is
+      an ablation, keep it deliberately simple per the spec.
+  Both models: multi-task (one shared trunk + separate small heads per
+  question_type), trained jointly with cross-entropy summed/averaged
+  across question types.
+- Train/val/test split inherited from the dataset's own `split` column
+  (never re-split here). Single seed = 42. No hyperparameter search --
+  pick one reasonable small config (e.g. attention dim = embedding dim,
+  1-2 heads, a couple hundred/thousand parameters in the MLP head) and
+  say so plainly in the paper.
+- CLI args: `--track {clip,biomedclip,both}` and `--mode {set_attention,
+  mean_pool,both}`. Save each trained config's val/test accuracy (overall
+  and per question_type) to
+  `compositional_vqa_v1/metrics_{mode}_{track}.json`, and the checkpoint
+  to `compositional_vqa_v1/model_{mode}_{track}.pt`.
+- This should train in minutes even on CPU (inputs are small cached
+  vectors, not images) -- if it's taking longer than that, something is
+  wrong (e.g. accidentally re-embedding images), stop and check rather
+  than letting it run for hours.
+- Unit test with a synthetic dataset (a handful of fake panel-embedding
+  sets + question embeddings + labels) verifying: the model trains
+  without crashing, padding masking actually ignores padded panel slots
+  (construct a case where changing a padded slot's values must not change
+  the output), and both model classes produce differently-shaped
+  attention behavior (mean-pool truly ignores position/order; set
+  attention's output changes if you permute two real panels' order when
+  positional embeddings are added -- this proves the positional encoding
+  is doing something, don't skip this check).
+
+### 11.4 -- Single-panel VLM baseline via saved predictions (spec section 5.1)
+
+New script: `11_compositional_panel_vqa/04_baseline_single_panel_vlm_eval.py`
+
+- For each VLM with saved predictions under
+  `vlm_benchmark_{track}_v1/vqa_predictions/{model}.parquet` (auto-discover
+  every `.parquet` file in that directory -- don't hardcode model names),
+  build a `panel_id -> predicted_modality_tag` / `panel_id -> predicted_anatomy_tag`
+  lookup by applying the SAME keyword tables from script 11.2 to that
+  VLM's raw free-text `prediction` string for the existing `modality` /
+  `anatomy` question rows (these question types already exist in the
+  original Stage 6 VQA dataset, so the predictions already exist on disk
+  -- this step does NOT call any model).
+- For every row in `compositional_vqa_dataset_{track}.parquet`, recompute
+  what that VLM's answer WOULD be using only its own (possibly wrong or
+  missing) per-panel tags, by applying the exact same same/different,
+  odd-one-out, and count derivation logic used to build the ground truth
+  in script 11.2 -- then compare to the true ground-truth `answer` for
+  accuracy.
+- Per spec: if any panel required for a question has no saved prediction
+  for a given model (e.g. it fell outside that model's sampled
+  MAX_VQA_SAMPLES subset in Stage 10), EXCLUDE that question from that
+  model's score. Do not impute or guess.
+- Output: `compositional_vqa_v1/baseline_vlm_metrics_{track}.json` --
+  per-model, per-question-type accuracy, n_evaluated, and n_excluded
+  (missing-prediction) counts. Also compute and save the confusion
+  breakdown the spec asks for (e.g. what fraction of same/different
+  answers the baseline always guesses "same").
+
+### 11.5 -- Aggregation + ablation table (spec section 5.2-5.4)
+
+New script: `11_compositional_panel_vqa/05_run_full_evaluation_and_ablations.py`
+
+- Combines script 11.3's `metrics_{mode}_{track}.json` files (both
+  modes x whichever tracks you ran) and script 11.4's
+  `baseline_vlm_metrics_{track}.json` into one table: rows = {each
+  single-panel VLM baseline, mean-pool ablation, set-attention (proposed)}
+  x {CLIP, BiomedCLIP if both were run}, columns = accuracy per question
+  type + overall.
+- Write `compositional_vqa_v1/final_ablation_table.csv` and `.json`, plus
+  a simple bar-chart figure (`compositional_vqa_v1/plots/ablation_comparison.png`,
+  matplotlib, matching the style of the existing
+  `figures/quality_overview.png`) comparing all rows.
+
+### 11.6 -- Paper-asset export (nice-to-have, do this if time allows)
+
+New script: `11_compositional_panel_vqa/06_export_paper_assets.py`
+
+- Reads `final_ablation_table.csv/json` and the question-generation
+  summary stats, and writes ready-to-`\input{}` LaTeX table snippets
+  (booktabs style) to `paper/tables/results_table.tex` and
+  `paper/tables/dataset_stats_table.tex`. This exists so the paper's
+  numbers come directly from a script's output, not hand-transcription --
+  keep it that way even under deadline pressure; do not hand-edit numbers
+  into the .tex files after the fact.
+
+===============================================================================
+THE PAPER (NeurIPS main-track format, LaTeX)
+===============================================================================
+
+- Fetch the official current-year NeurIPS LaTeX style files (search for
+  "neurips latex style" if you have internet access; the checklist/style
+  file is normally distributed from the NeurIPS website or its GitHub).
+  Put them under `paper/` (e.g. `paper/neurips_2024.sty` or whatever the
+  current year's file is named -- check `paper/README.md` you create for
+  which version you used and why).
+- `paper/main.tex` should compile with `pdflatex`/`latexmk` (both are
+  installed on this machine per earlier setup -- confirm on yours with
+  `which pdflatex latexmk`) into a full NeurIPS-formatted PDF.
+- Sections, in order: Abstract, Introduction (use the motivation from
+  spec section 1 -- the "VLM can't see the whole figure" observation is a
+  strong, concrete hook), Related Work (compound/multi-panel figure
+  datasets, medical VQA, set-based/permutation-invariant architectures --
+  you will need to find and cite real papers here, do not invent
+  citations), Task Definition (spec section 3), Method (spec section 4),
+  Experimental Setup (spec section 5 + section 6 scope cuts, stated
+  honestly), Results (populated from `paper/tables/*.tex` via
+  script 11.6 -- if those don't exist yet when you're writing, leave an
+  explicit `% TODO: run 11_compositional_panel_vqa/05_... and 06_... then
+  \input the generated tables here` comment, do not fill in numbers by
+  hand), Limitations (single seed, small scope, categorical-only answer
+  space, alignment fix's own imperfections -- see script 11.1's summary
+  stats), Conclusion, References (real, verifiable citations only).
+- Do not claim results you have not actually produced by running the
+  scripts above. If the deadline arrives before real numbers exist, the
+  honest move is a clearly marked incomplete Results section, not a
+  fabricated one.
+
+===============================================================================
+THE PRESENTATION
+===============================================================================
+
+- `presentation/slides.tex` using LaTeX Beamer (already available via the
+  same LaTeX install), mirroring the paper's structure: problem/hook,
+  task definition (with a visual using one of the existing
+  `figures/*_demo.png` images to show the compound-figure/panel-crop
+  pipeline), method diagram, results table (reuse the same generated
+  `.tex` table from script 11.6 rather than re-typing numbers),
+  limitations, conclusion. Keep it to a reasonable slide count (12-18
+  slides) for a conference talk, not a copy of the whole paper.
+
+===============================================================================
+FOLDER STRUCTURE / README
+===============================================================================
+
+- Add a `README.md` inside `11_compositional_panel_vqa/` explaining what
+  each numbered script does and the order to run them in, matching the
+  style of the top-level README.md's stage table.
+- Update the top-level `README.md`'s stage table to add Stage 11, and add
+  it to `run_pipeline.py`'s `STAGES` list (after Stage 08, since it
+  depends on the VLM benchmark predictions) -- mark the paper/presentation
+  generation steps as NOT part of `run_pipeline.py` (they're not
+  re-run-on-every-pipeline-run artifacts).
+- Create the `NOTES_FOR_AUTHOR.md` file that the top-level README.md
+  already references under "Running this outside Colab/Kaggle" but which
+  does not actually exist in the repo -- use it to note the config.py /
+  env-var refactor idea already mentioned there, plus anything else you
+  learn while implementing this stage that a future maintainer should
+  know.
+- Add a `paper/README.md` and `presentation/README.md` each explaining
+  how to rebuild (`latexmk -pdf main.tex` or equivalent) and where their
+  generated-table dependencies come from.
+
+===============================================================================
+WHEN YOU'RE DONE
+===============================================================================
+
+1. Run `python3 -m pytest tests/ -v` and confirm everything passes.
+2. Run `git status` and review exactly what's being committed (this repo
+   has already had one accidental `__pycache__` commit cleaned up --
+   check `.gitignore` covers your build artifacts, e.g. LaTeX's `.aux`/
+   `.log`/etc., which are already added).
+3. Commit with a clear message, then `git push` to `origin main` (this is
+   Fasih's own repo at github.com/Fasih20/... -- pushing is expected and
+   fine once the work is in a coherent, honest state).
+4. Report back clearly: what actually ran end-to-end with real numbers,
+   what's still a TODO/placeholder, and what you had to cut for time --
+   do not report partial or untested work as "complete."
