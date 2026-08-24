@@ -4,11 +4,11 @@ Each test question is shown with every panel crop in reading order. Predictions
 are written incrementally; interrupted Colab runs resume by question key.
 """
 from __future__ import annotations
-import argparse, gc, json, os, re
+import argparse, gc, json, math, os, re
 from pathlib import Path
 import pandas as pd
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw
 
 PIPELINE_ROOT = Path(os.environ.get("PIPELINE_ROOT", "./pipeline_data")).resolve()
 OUT_DIR = PIPELINE_ROOT / "compositional_vqa_v1"
@@ -39,15 +39,32 @@ def resolve_crop(stored: str, panel_id: str) -> Path:
         if path.exists(): return path
     raise FileNotFoundError(f"crop missing for {panel_id}: {candidates}")
 
+def make_contact_sheet(images: list[Image.Image], panel_ids: list[str]) -> Image.Image:
+    """Pack all ordered panels into one bounded image to fit 16 GB Colab GPUs."""
+    columns = min(3, len(images))
+    rows = math.ceil(len(images) / columns)
+    cell_w, cell_h, label_h = 448, 448, 28
+    sheet = Image.new("RGB", (columns * cell_w, rows * (cell_h + label_h)), "white")
+    draw = ImageDraw.Draw(sheet)
+    for index, (image, panel_id) in enumerate(zip(images, panel_ids)):
+        col, row = index % columns, index // columns
+        tile = image.copy(); tile.thumbnail((cell_w, cell_h))
+        x = col * cell_w + (cell_w - tile.width) // 2
+        y = row * (cell_h + label_h) + label_h + (cell_h - tile.height) // 2
+        sheet.paste(tile, (x, y))
+        label = chr(ord("A") + index) if index < 26 else str(panel_id)
+        draw.text((col * cell_w + 8, row * (cell_h + label_h) + 6), f"Panel {label}", fill="black")
+    return sheet
+
 def load_model(key: str, token: str | None):
     from transformers import (AutoProcessor, AutoModelForImageTextToText,
                               BitsAndBytesConfig, Qwen2VLForConditionalGeneration,
                               Qwen2_5_VLForConditionalGeneration)
     model_id = MODELS[key]; processor = AutoProcessor.from_pretrained(model_id, token=token)
-    common = {"device_map": "auto", "token": token, "torch_dtype": torch.bfloat16}
+    common = {"device_map": "auto", "token": token, "dtype": torch.bfloat16,
+              "quantization_config": BitsAndBytesConfig(load_in_4bit=True,
+                  bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4")}
     if key == "lingshu-7b":
-        common["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4")
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, **common)
     elif key == "medvlm-r1":
         model = Qwen2VLForConditionalGeneration.from_pretrained(model_id, **common)
@@ -69,11 +86,13 @@ def evaluate(track: str, key: str, token: str | None):
     for index, row in dataset.iterrows():
         qkey = f"{row.figure_id}||{row.question_type}||{row.question}"
         if qkey in done: continue
-        images = [Image.open(resolve_crop(paths[str(pid)], str(pid))).convert("RGB") for pid in row.panel_ids]
+        panel_ids = [str(pid) for pid in row.panel_ids]
+        images = [Image.open(resolve_crop(paths[pid], pid)).convert("RGB") for pid in panel_ids]
+        contact_sheet = make_contact_sheet(images, panel_ids)
         choices = [str(x) for x in row.answer_space]
         prompt = (f"Panels are supplied in reading order A, B, C, and so on. {row.question} "
                   f"Answer using exactly one choice from: {', '.join(choices)}. Give only the answer.")
-        content = [{"type": "image", "image": image} for image in images] + [{"type": "text", "text": prompt}]
+        content = [{"type": "image", "image": contact_sheet}, {"type": "text", "text": prompt}]
         messages = [{"role": "user", "content": content}]
         inputs = processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=True,
             return_dict=True, return_tensors="pt").to(model.device)

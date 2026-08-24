@@ -29,6 +29,7 @@ fetch_source = fetch_source.replace('/content/womens_health_stage11', str(ROOT))
 exec(compile(fetch_source, "colab_fetch_drive_data.py", "exec"), {"__name__": "__main__"})
 
 env = os.environ.copy(); env["PIPELINE_ROOT"] = str(PIPELINE)
+env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 for script in ("01_fix_panel_caption_alignment.py", "02_generate_compositional_questions.py"):
     subprocess.run([sys.executable, str(REPO / "11_compositional_panel_vqa" / script), "--track", "both"],
                    check=True, env=env)
@@ -40,7 +41,7 @@ if local_predictions.exists() and not local_predictions.is_symlink():
     shutil.copytree(local_predictions, drive_predictions, dirs_exist_ok=True); shutil.rmtree(local_predictions)
 if not local_predictions.exists(): local_predictions.symlink_to(drive_predictions, target_is_directory=True)
 metrics_link = out / "medical_vlm_metrics.json"; drive_metrics = RESULTS / "medical_vlm_metrics.json"
-if not metrics_link.exists(): metrics_link.symlink_to(drive_metrics)
+if not metrics_link.exists() and not metrics_link.is_symlink(): metrics_link.symlink_to(drive_metrics)
 
 subprocess.run([sys.executable, str(REPO / "11_compositional_panel_vqa/07_benchmark_medical_vlms.py"),
                 "--track", "both", "--model", "all"], check=True, env=env)
