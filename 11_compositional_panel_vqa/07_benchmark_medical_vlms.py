@@ -60,7 +60,14 @@ def load_model(key: str, token: str | None):
     from transformers import (AutoProcessor, AutoModelForImageTextToText,
                               BitsAndBytesConfig, Qwen2VLForConditionalGeneration,
                               Qwen2_5_VLForConditionalGeneration)
-    model_id = MODELS[key]; processor = AutoProcessor.from_pretrained(model_id, token=token)
+    model_id = MODELS[key]
+    processor_kwargs = {"token": token}
+    # Qwen-VL otherwise keeps the full contact-sheet resolution, making its
+    # vision attention quadratic enough to request ~16 GiB in one allocation.
+    # The bounded budget retains all labeled panels while fitting a T4.
+    if key in {"lingshu-7b", "medvlm-r1"}:
+        processor_kwargs.update(min_pixels=256 * 256, max_pixels=768 * 768)
+    processor = AutoProcessor.from_pretrained(model_id, **processor_kwargs)
     device_map = "balanced" if torch.cuda.device_count() > 1 else "auto"
     common = {"device_map": device_map, "token": token, "dtype": torch.bfloat16,
               "quantization_config": BitsAndBytesConfig(load_in_4bit=True,
