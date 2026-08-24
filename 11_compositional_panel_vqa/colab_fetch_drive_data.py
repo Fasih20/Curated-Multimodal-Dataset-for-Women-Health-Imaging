@@ -9,6 +9,9 @@ ROOT = Path("/content/womens_health_stage11")
 ARCHIVE = ROOT / "pipeline_data.zip"
 EXTRACT = ROOT / "drive_archive"
 
+# gdown creates the output file, but it does not create its parent directory.
+ROOT.mkdir(parents=True, exist_ok=True)
+
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "gdown"], check=True)
 import gdown
 
