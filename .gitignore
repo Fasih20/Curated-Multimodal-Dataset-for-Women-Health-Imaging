@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+pipeline_data/
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.nav
+*.snm
+*.fls
+*.fdb_latexmk
