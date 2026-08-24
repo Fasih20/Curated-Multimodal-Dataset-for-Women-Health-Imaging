@@ -2,6 +2,7 @@ __pycache__/
 .venv/
 .tmp-pip/
 .pytest_cache/
+.hf_token
 *.pyc
 pipeline_data/
 *.aux
